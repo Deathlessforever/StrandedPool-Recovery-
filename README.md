@@ -53,6 +53,22 @@ uvicorn app.main:app --reload
 
 Open http://127.0.0.1:8000 for the web app and http://127.0.0.1:8000/docs for interactive API docs.
 
+## Run with Docker
+
+Docker and Docker Compose are required.
+
+~~~bash
+docker compose up --build
+~~~
+
+Open http://localhost:8000. Compose mounts a named volume for SQLite so saved demo plans survive container recreation. To stop the app:
+
+~~~bash
+docker compose down
+~~~
+
+This is a local deployment configuration. A public production deployment still needs a host, persistent storage, monitoring, HTTPS, privacy controls, and verified provider integrations.
+
 ## API example
 
 ~~~bash
