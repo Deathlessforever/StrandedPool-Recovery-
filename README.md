@@ -12,7 +12,9 @@ This repository is an independent implementation. The original repository did no
 - Simulated capacity checks and shared-ride pooling proposals.
 - Downstream booking risk reminders for hotels and onward pickups.
 - Copyable draft messages for hotel, pickup, and refund/assistance requests.
-- Input validation, API documentation, and automated tests.
+- SQLite persistence for saved recovery plans, selected demo options, and an audit trail.
+- Safe decision recording: rejects options that fail the model's constraints.
+- API documentation, input validation, and automated tests in GitHub Actions.
 
 ## Important data boundary
 
@@ -69,6 +71,16 @@ curl -X POST http://127.0.0.1:8000/api/recovery/plan \
 ~~~
 
 Response includes ranked alternatives, feasibility reasons, pool proposals, downstream risks, and draft messages. Every alternative has simulated=true and the response identifies its data mode.
+
+## Saved plans and audit history
+
+- `POST /api/recovery/saved-plans` — generate and save a proposal to local SQLite.
+- `GET /api/recovery/saved-plans` — list saved proposals.
+- `GET /api/recovery/saved-plans/{id}` — retrieve a proposal and its audit events.
+- `POST /api/recovery/saved-plans/{id}/resolve` — record a feasible option chosen by the traveller. This records a decision only; it does not book transport.
+- `GET /api/recovery/saved-plans/{id}/audit` — read the audit trail.
+
+The browser interface also has controls to save a plan and review saved history. SQLite is stored in `strandedpool.db` by default; set `STRANDEDPOOL_DB` to choose another path.
 
 ## Tests
 
