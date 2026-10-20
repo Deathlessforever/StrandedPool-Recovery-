@@ -1,10 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Literal
+import json
+import os
+import sqlite3
+from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
+
+DB_PATH = Path(os.getenv("STRANDEDPOOL_DB", "strandedpool.db"))
 
 app = FastAPI(
     title="StrandedPool Recovery",
@@ -46,6 +52,42 @@ class RecoveryPlan(BaseModel):
     downstream_risks: list[dict]
     action_pack: list[dict]
     note: str
+
+class ResolutionRequest(BaseModel):
+    selected_provider: str = Field(min_length=1, max_length=100)
+    decision_note: str = Field(default="", max_length=1000)
+
+def db_connect():
+    connection = sqlite3.connect(DB_PATH)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+def init_db():
+    with db_connect() as connection:
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS saved_plans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'proposed',
+                origin TEXT NOT NULL,
+                destination TEXT NOT NULL,
+                plan_json TEXT NOT NULL,
+                selected_provider TEXT,
+                decision_note TEXT
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS audit_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                plan_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                event TEXT NOT NULL,
+                detail TEXT NOT NULL,
+                FOREIGN KEY(plan_id) REFERENCES saved_plans(id)
+            )
+        """)
+
+init_db()
 
 def parse_time(value: str) -> datetime:
     try:
@@ -131,6 +173,92 @@ def build_plan(req: Booking) -> RecoveryPlan:
         action_pack=actions,
         note="This MVP does not query live schedules, prices, seats, weather or booking systems. Verify all travel details with providers. It does not book, cancel or message anyone."
     )
+
+@app.post("/api/recovery/saved-plans")
+def save_recovery_plan(req: Booking):
+    """Create a demo recovery plan and persist it locally for later review."""
+    try:
+        plan = build_plan(req)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with db_connect() as connection:
+        cursor = connection.execute(
+            "INSERT INTO saved_plans(created_at, status, origin, destination, plan_json) VALUES (?, 'proposed', ?, ?, ?)",
+            (now, req.origin, req.destination, plan.model_dump_json())
+        )
+        plan_id = cursor.lastrowid
+        connection.execute(
+            "INSERT INTO audit_events(plan_id, created_at, event, detail) VALUES (?, ?, 'plan_created', ?)",
+            (plan_id, now, "Generated a recovery proposal using simulated transport inventory.")
+        )
+    return {"plan_id": plan_id, "status": "proposed", "plan": plan}
+
+@app.get("/api/recovery/saved-plans")
+def list_saved_plans():
+    """Return saved demo plans, newest first."""
+    with db_connect() as connection:
+        rows = connection.execute(
+            "SELECT id, created_at, status, origin, destination, selected_provider, decision_note FROM saved_plans ORDER BY id DESC LIMIT 100"
+        ).fetchall()
+    return {"items": [dict(row) for row in rows]}
+
+@app.get("/api/recovery/saved-plans/{plan_id}")
+def get_saved_plan(plan_id: int):
+    with db_connect() as connection:
+        row = connection.execute("SELECT * FROM saved_plans WHERE id = ?", (plan_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Saved recovery plan not found")
+        events = connection.execute(
+            "SELECT created_at, event, detail FROM audit_events WHERE plan_id = ? ORDER BY id",
+            (plan_id,)
+        ).fetchall()
+    item = dict(row)
+    item["plan"] = json.loads(item.pop("plan_json"))
+    item["audit_events"] = [dict(event) for event in events]
+    return item
+
+@app.post("/api/recovery/saved-plans/{plan_id}/resolve")
+def resolve_saved_plan(plan_id: int, request: ResolutionRequest):
+    """Record the traveller's chosen demo option. This does not book transport."""
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with db_connect() as connection:
+        row = connection.execute("SELECT plan_json, status FROM saved_plans WHERE id = ?", (plan_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Saved recovery plan not found")
+        plan = json.loads(row["plan_json"])
+        option = next((a for a in plan["alternatives"] if a["provider"] == request.selected_provider), None)
+        if option is None:
+            raise HTTPException(status_code=422, detail="Provider is not an alternative in this saved plan")
+        if not option["feasible"]:
+            raise HTTPException(status_code=422, detail="Cannot select an alternative that fails the demo constraints")
+        connection.execute(
+            "UPDATE saved_plans SET status = 'decision_recorded', selected_provider = ?, decision_note = ? WHERE id = ?",
+            (request.selected_provider, request.decision_note, plan_id)
+        )
+        detail = json.dumps({"selected_provider": request.selected_provider, "note": request.decision_note})
+        connection.execute(
+            "INSERT INTO audit_events(plan_id, created_at, event, detail) VALUES (?, ?, 'traveller_decision_recorded', ?)",
+            (plan_id, now, detail)
+        )
+    return {
+        "plan_id": plan_id,
+        "status": "decision_recorded",
+        "selected_provider": request.selected_provider,
+        "note": "Decision saved locally only. No transport was booked and no provider was contacted."
+    }
+
+@app.get("/api/recovery/saved-plans/{plan_id}/audit")
+def get_plan_audit(plan_id: int):
+    with db_connect() as connection:
+        exists = connection.execute("SELECT id FROM saved_plans WHERE id = ?", (plan_id,)).fetchone()
+        if exists is None:
+            raise HTTPException(status_code=404, detail="Saved recovery plan not found")
+        events = connection.execute(
+            "SELECT created_at, event, detail FROM audit_events WHERE plan_id = ? ORDER BY id",
+            (plan_id,)
+        ).fetchall()
+    return {"plan_id": plan_id, "events": [dict(event) for event in events]}
 
 @app.get("/health")
 def health():
