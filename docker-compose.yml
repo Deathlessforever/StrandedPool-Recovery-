@@ -1,0 +1,13 @@
+services:
+  strandedpool:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      STRANDEDPOOL_DB: /data/strandedpool.db
+    volumes:
+      - strandedpool-data:/data
+    restart: unless-stopped
+
+volumes:
+  strandedpool-data:
