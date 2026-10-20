@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from typing import Literal
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -138,7 +138,10 @@ def health():
 
 @app.post("/api/recovery/plan", response_model=RecoveryPlan)
 def recovery_plan(req: Booking):
-    return build_plan(req)
+    try:
+        return build_plan(req)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 @app.get("/", response_class=HTMLResponse)
 def home():
