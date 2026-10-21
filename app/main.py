@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException
 import httpx
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel, Field
+from app.flight_provider import router as flight_router, flight_provider_status
 
 DB_PATH = Path(os.getenv("STRANDEDPOOL_DB", "strandedpool.db"))
 
@@ -18,6 +19,9 @@ app = FastAPI(
     description="A working travel-disruption recovery MVP. Demo inventory is simulated, not live availability.",
     version="0.1.0",
 )
+
+# Flight search is a separate provider-backed path; demo planning remains explicitly simulated.
+app.include_router(flight_router)
 
 class Booking(BaseModel):
     origin: str = Field(default="Mysuru", min_length=1, max_length=80)
@@ -357,6 +361,7 @@ def readiness():
 def provider_status():
     """Report integration capability without claiming unverified connectivity."""
     return {
+        "flight_search": flight_provider_status(),
         "transport_inventory": {
             "status": "simulated_only",
             "live_data_available": False,
@@ -710,6 +715,17 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0a1220;border-radius
 <div class="eyebrow">Predict · Pool · Recover</div><h1>Your journey changed.<br>Let's find a way forward.</h1>
 <p>Travel-disruption recovery prototype with constraint-aware alternatives, group pooling ideas and ready-to-review messages.</p>
 <div class="notice"><strong>Prototype mode:</strong> all fares, seats, operators and schedules below are simulated. Current weather and estimated road-route context are fetched separately when available. Nothing is booked.</div>
+<section class="panel section" id="live-flights">
+<h2>Live flight search · DRCT</h2>
+<p>Uses the flight provider API when server credentials are configured. A search result is not a confirmed seat; use provider repricing before making a decision. Airport codes are IATA codes.</p>
+<form id="flight-form">
+<label for="flight-origin">Origin airport</label><input id="flight-origin" name="origin_airport" value="BLR" pattern="[A-Za-z]{3}" maxlength="3" required>
+<label for="flight-destination">Destination airport</label><input id="flight-destination" name="destination_airport" value="DEL" pattern="[A-Za-z]{3}" maxlength="3" required>
+<label for="flight-date">Departure date</label><input id="flight-date" name="departure_date" type="date" required>
+<label for="flight-adults">Adults</label><input id="flight-adults" name="adults" type="number" min="1" max="9" value="1" required>
+<button id="flight-submit" type="submit">Search provider flights</button>
+</form><p id="flight-error" class="bad" role="alert"></p><div id="flight-results" class="cards"></div>
+</section>
 <div class="layout"><section class="panel"><h2>Your disrupted trip</h2>
 <form id="form">
 <label>From</label><input name="origin" value="Mysuru" required maxlength="80">
@@ -744,4 +760,10 @@ results.addEventListener('click',event=>{const button=event.target.closest('[dat
 
 window.loadHistory=async()=>{const target=document.querySelector('#history');if(!target)return;target.innerHTML='<p>Loading saved plans…</p>';try{const r=await fetch('/api/recovery/saved-plans');const d=await r.json();target.innerHTML='<h3>Saved recovery history</h3>'+(d.items.length?d.items.map(p=>'<div class="action"><strong>#'+p.id+' · '+esc(p.origin)+' → '+esc(p.destination)+'</strong><p>'+esc(p.status)+' · '+esc(p.created_at)+'</p>'+(p.selected_provider?'<p>Selected demo option: '+esc(p.selected_provider)+'</p>':'')+'<a href="/api/recovery/saved-plans/'+p.id+'" target="_blank" rel="noreferrer">Open plan details and audit log</a> · <a href="/api/recovery/saved-plans/'+p.id+'/export.txt">Download summary</a></div>').join(''):'<p>No saved plans yet.</p>')}catch(e){target.innerHTML='<p>Could not load saved history.</p>'}};
 window.copyMsg=async i=>{const t=document.querySelector('#msg'+i).textContent;try{await navigator.clipboard.writeText(t);alert('Message copied')}catch(e){alert('Copy failed — select the text and copy manually')}};
+
+const flightForm=document.querySelector('#flight-form'), flightResults=document.querySelector('#flight-results'), flightError=document.querySelector('#flight-error');
+document.querySelector('#flight-date').value=new Date(Date.now()+7*86400000).toISOString().slice(0,10);
+flightForm.addEventListener('submit',async e=>{e.preventDefault();flightError.textContent='';flightResults.innerHTML='<p>Contacting flight provider…</p>';const f=new FormData(flightForm);const q=new URLSearchParams({origin_airport:String(f.get('origin_airport')).toUpperCase(),destination_airport:String(f.get('destination_airport')).toUpperCase(),departure_date:f.get('departure_date'),adults:f.get('adults')});try{const r=await fetch('/api/flights/search?'+q.toString());const d=await r.json();if(!r.ok)throw new Error(d.detail||'Flight search failed');flightResults.innerHTML=d.alternatives.length?d.alternatives.map(a=>'<article class="option"><span class="tag">'+esc(d.data_mode)+'</span><h3>Option '+a.rank+' · '+esc(a.provider_offer_id)+'</h3><p>'+(a.departure_local?esc(a.departure_local):'Departure time not supplied')+' → '+(a.arrival_local?esc(a.arrival_local):'Arrival time not supplied')+'</p><div class="money">'+(a.fare===null?'Fare not supplied':esc(a.currency||'')+' '+esc(a.fare))+'</div><p>'+(a.duration_minutes===null?'Duration not supplied':esc(a.duration_minutes)+' minutes')+' · '+(a.transfer_minutes===null?'Transfer time unknown':esc(a.transfer_minutes)+' min transfer')+' · '+(a.stops===null?'Stops unknown':esc(a.stops)+' stops')+'</p><p>Availability: '+esc(a.availability_status)+'</p><p class="muted">'+esc(a.ranking_note)+'</p>'+(String(a.provider_offer_id).startsWith('response-option-')?'':'<button type="button" data-reprice="'+esc(a.provider_offer_id)+'">Recheck price with provider</button>')+'<pre hidden id="reprice-'+esc(a.provider_offer_id)+'"></pre></article>').join(''):'<p>No offers returned by provider for this route/date. No demo options were substituted.</p>';flightResults.insertAdjacentHTML('beforeend','<p class="muted">'+esc(d.note)+'</p>')}catch(err){flightResults.innerHTML='';flightError.textContent=err.message||'Flight provider unavailable; no simulated flights were substituted.'}});
+flightResults.addEventListener('click',async e=>{const b=e.target.closest('[data-reprice]');if(!b)return;b.disabled=true;b.textContent='Rechecking…';const id=b.dataset.reprice;try{const r=await fetch('/api/flights/reprice/'+encodeURIComponent(id),{method:'POST'});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Provider repricing failed');const target=document.querySelector('#reprice-'+CSS.escape(id));target.hidden=false;target.textContent=d.verification+' · '+(d.current_fare===null?'Current fare not parsed':String(d.currency||'')+' '+String(d.current_fare))+' · expires '+String(d.expires_at||'not supplied')+'\\n\\n'+JSON.stringify(d.provider_response,null,2);b.textContent=d.verification}catch(err){b.textContent='Retry provider recheck';alert(err.message||'Could not reprice offer')}finally{b.disabled=false}});
+
 </script></body></html>""")

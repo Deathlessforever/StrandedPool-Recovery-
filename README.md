@@ -99,6 +99,38 @@ Response includes ranked alternatives, feasibility reasons, pool proposals, down
 
 `GET /api/booking/sites?mode=Bus&origin=Mysuru&destination=Mangaluru&departure_date=2026-10-21` returns a whitelisted real provider website and clearly states that no inventory check or booking was performed. The browser shows a `Check real booking site` button on each transport alternative. Supported handoffs: bus → redBus, train → IRCTC, shared cab → BlaBlaCar, private cab → Uber, and flight → MakeMyTrip. The traveller must re-enter route/date details on the provider site and independently verify availability and final price. Direct in-app booking requires approved partner APIs and is not implemented.
 
+### Flight search provider integration (first live transport mode)
+
+The flight search path is separate from the existing recovery planner. The existing planner still uses clearly labelled simulated bus/train/cab candidates; do not interpret those options as live inventory.
+
+This branch adds a DRCT-backed flight search API and UI:
+- `GET /api/flights/status` — reports whether credentials are configured and whether the selected environment is production or sandbox.
+- `GET /api/flights/search?origin_airport=BLR&destination_airport=DEL&departure_date=2026-12-15&adults=1` — requests provider flight offers and ranks only using provider-returned fare, journey duration, transfer duration (when derivable), and stops. Unknown values remain unknown; no fare, timetable, transfer, or seat count is fabricated.
+- `POST /api/flights/reprice/{offer_id}` — requests a provider reprice before a traveller relies on a search result. Repricing does not book or issue a ticket.
+- The browser UI has a dedicated flight-search panel with an explicit provider data label and a reprice action.
+
+**Important:** a search result is an offer returned by the provider, not a guaranteed seat. Availability/pricing can change; reprice before acting. The adapter never books, issues tickets, charges a payment method, or cancels a flight. It also does not claim to expose exact seat counts unless the provider response supplies them.
+
+#### Credentials and provider access
+
+DRCT documents a no-cost sandbox key and a search → reprice → order → ticket workflow. Its sandbox returns test bookings and limited flight data, so sandbox responses are always labelled `SANDBOX_TEST_DATA`, never live. Production access requires a contract and production credentials. See the [DRCT API documentation](https://docs.drct.aero/).
+
+Set secrets on the server, never in the browser or Git:
+- `STRANDEDPOOL_DRCT_API_KEY` — required.
+- `STRANDEDPOOL_DRCT_ENV=production` — production endpoint (default). Set to `sandbox` only for test data.
+- `STRANDEDPOOL_DRCT_VERSION=2026-09-01` — optional API version.
+
+Example for local development (PowerShell):
+```powershell
+$env:STRANDEDPOOL_DRCT_API_KEY="your-provider-key"
+$env:STRANDEDPOOL_DRCT_ENV="sandbox"
+uvicorn app.main:app --reload
+```
+
+For a real-fare pilot, obtain production access directly from DRCT, configure the production key on the server, and verify the supported airline/route coverage. Without a key, the flight endpoint returns a clear 503 instead of simulated flight results. A sandbox key is useful for integration tests but is not evidence of live Indian domestic flight fares.
+
+The first flight ranking orders offers by fare, then total journey duration, then provider-derived transfer time, then stops. This is deliberately transparent rather than pretending to have a universal optimisation score. If the provider response omits a field, that field remains unknown and is not estimated. Currency is provider-reported; budget comparisons are only meaningful when the fare is returned in INR.
+
 ### Provider status
 
 `GET /api/providers/status` reports what is actually implemented. Transport inventory is marked simulated-only, current weather and driving-route context are marked implemented on demand, and booking/cancellation/provider messaging are explicitly marked not implemented.
