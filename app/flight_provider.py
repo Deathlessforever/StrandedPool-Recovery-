@@ -161,6 +161,17 @@ def _transfer_minutes(option: dict, response: dict) -> int | None:
     return sum(layovers)
 
 
+def _local_segment_time(segment: dict, prefix: str) -> str | None:
+    date_value = segment.get(f"{prefix}_date")
+    time_value = segment.get(f"{prefix}_time")
+    if isinstance(date_value, str) and isinstance(time_value, str):
+        try:
+            return datetime.fromisoformat(f"{date_value}T{time_value}").isoformat(timespec="minutes")
+        except ValueError:
+            return None
+    return None
+
+
 def _segment_count(option: dict, response: dict) -> int | None:
     segments = []
     for item in _walk_dicts(option):
@@ -232,14 +243,21 @@ def _normalise_options(payload: dict | list) -> list[dict]:
             duration = sum(duration_values) if duration_values else _duration_minutes(offer, payload)
             if duration is None:
                 duration = _duration_minutes(option, payload)
+            departure_local = None
+            arrival_local = None
             if segment_refs:
                 segment_count = sum(1 for ref in segment_refs if ref in segments_by_id) or len(segment_refs)
                 resolved_segments = [segments_by_id[ref] for ref in segment_refs if ref in segments_by_id]
+                if resolved_segments:
+                    departure_local = _local_segment_time(resolved_segments[0], "departure")
+                    arrival_local = _local_segment_time(resolved_segments[-1], "arrival")
                 transfer_seconds = [segment.get("transfer_time") for segment in resolved_segments if isinstance(segment.get("transfer_time"), (int, float)) and segment.get("transfer_time") >= 0]
                 transfer_minutes = int(sum(transfer_seconds) // 60) if transfer_seconds else _transfer_minutes({"segments": segment_refs}, {"segments": list(segments_by_id.values())})
             else:
                 segment_count = _segment_count(offer, payload)
                 transfer_minutes = _transfer_minutes(offer, payload)
+                departure_local = None
+                arrival_local = None
             stops = max(0, segment_count - 1) if segment_count is not None else None
             offer_id = offer.get("id") or offer.get("offer_id") or option.get("id")
             if not offer_id:
@@ -250,6 +268,9 @@ def _normalise_options(payload: dict | list) -> list[dict]:
                 "fare": fare,
                 "currency": currency,
                 "duration_minutes": duration,
+                "departure_local": departure_local,
+                "arrival_local": arrival_local,
+                "schedule_timezone_note": "local airport times; timezone offset not supplied by this response" if departure_local or arrival_local else None,
                 "segments": segment_count,
                 "stops": stops,
                 "transfer_minutes": transfer_minutes,
