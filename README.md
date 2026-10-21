@@ -13,6 +13,7 @@ This repository is an independent implementation. The original repository did no
 - Live 3-day city-level weather outlook for the origin and destination, including temperature range, precipitation chance, rainfall, and maximum wind, with no fabricated fallback.
 - Estimated road-driving distance and duration from Open-Meteo geocoding and the OSRM public routing service, clearly separated from simulated public-transport options.
 - Provider-status endpoint that clearly distinguishes simulated transport inventory, on-demand weather integration, and unavailable booking actions.
+- External booking-site handoff buttons for bus, train, shared ride, and cab options. These open real provider websites for travellers to search and book directly; they do not scrape pages, transfer personal details, verify inventory, or claim to complete a booking.
 - Simulated capacity checks and shared-ride pooling proposals.
 - Downstream booking risk reminders for hotels and onward pickups.
 - Copyable draft messages for hotel, pickup, and refund/assistance requests.
@@ -93,6 +94,10 @@ curl -X POST http://127.0.0.1:8000/api/recovery/plan \
 ~~~
 
 Response includes ranked alternatives, feasibility reasons, pool proposals, downstream risks, and draft messages. Every alternative has simulated=true and the response identifies its data mode.
+
+### External booking-site handoff
+
+`GET /api/booking/sites?mode=Bus&origin=Mysuru&destination=Mangaluru&departure_date=2026-10-21` returns a whitelisted real provider website and clearly states that no inventory check or booking was performed. The browser shows a `Check real booking site` button on each transport alternative. Supported handoffs: bus → redBus, train → IRCTC, shared cab → BlaBlaCar, private cab → Uber, and flight → MakeMyTrip. The traveller must re-enter route/date details on the provider site and independently verify availability and final price. Direct in-app booking requires approved partner APIs and is not implemented.
 
 ### Provider status
 
