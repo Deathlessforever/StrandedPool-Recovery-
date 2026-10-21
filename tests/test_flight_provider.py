@@ -87,8 +87,8 @@ def test_normalises_documented_drct_offer_shape_and_transfer_time():
             "offers": [{"id": "LH_test_offer", "price": {"amount": 182.4, "currency": "EUR"}}],
         }],
         "segments": [
-            {"id": "S1", "transfer_time": 0, "duration": 9000},
-            {"id": "S2", "transfer_time": 1800, "duration": 9000},
+            {"id": "S1", "transfer_time": 0, "duration": 9000, "departure_date": "2026-12-15", "departure_time": "06:30", "arrival_date": "2026-12-15", "arrival_time": "09:00"},
+            {"id": "S2", "transfer_time": 1800, "duration": 9000, "departure_date": "2026-12-15", "departure_time": "09:30", "arrival_date": "2026-12-15", "arrival_time": "12:00"},
         ],
         "fares": [],
         "passengers": [{"id": "PAX1", "type": "ADT"}],
@@ -103,6 +103,8 @@ def test_normalises_documented_drct_offer_shape_and_transfer_time():
     assert item["segments"] == 2
     assert item["stops"] == 1
     assert item["transfer_minutes"] == 30
+    assert item["departure_local"] == "2026-12-15T06:30"
+    assert item["arrival_local"] == "2026-12-15T12:00"
     assert item["availability_status"] == "provider_offer_returned_unrepriced"
 
 
