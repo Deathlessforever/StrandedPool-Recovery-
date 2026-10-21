@@ -69,6 +69,41 @@ def test_timezone_aware_times_can_be_compared_consistently():
     assert response.status_code == 200
 
 
+def test_booking_site_handoff_returns_real_bus_provider_and_discloses_limitations():
+    response = client.get("/api/booking/sites", params={
+        "mode": "Bus", "origin": "Mysuru", "destination": "Mangaluru", "departure_date": "2026-10-21",
+    })
+    assert response.status_code == 200
+    data = response.json()
+    assert data["provider"] == "redBus"
+    assert data["booking_url"] == "https://www.redbus.in/"
+    assert data["inventory_checked"] is False
+    assert data["booking_completed"] is False
+    assert data["integration_type"] == "external_website_handoff"
+
+
+def test_booking_site_handoff_supports_irctc_train_search():
+    response = client.get("/api/booking/sites", params={
+        "mode": "Train", "origin": "Mysuru", "destination": "Bengaluru",
+    })
+    assert response.status_code == 200
+    assert response.json()["booking_url"] == "https://www.irctc.co.in/nget/train-search"
+
+
+def test_booking_site_handoff_rejects_same_origin_and_destination():
+    response = client.get("/api/booking/sites", params={
+        "mode": "Bus", "origin": "Mysuru", "destination": "mysuru",
+    })
+    assert response.status_code == 422
+
+
+def test_booking_site_handoff_rejects_unconfigured_mode():
+    response = client.get("/api/booking/sites", params={
+        "mode": "Teleport", "origin": "Mysuru", "destination": "Mangaluru",
+    })
+    assert response.status_code == 404
+
+
 def test_unknown_saved_plan_returns_404(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "DB_PATH", tmp_path / "missing-plan.db")
     main.init_db()
