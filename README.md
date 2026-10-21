@@ -18,6 +18,7 @@ This repository is an independent implementation. The original repository did no
 - Copyable draft messages for hotel, pickup, and refund/assistance requests.
 - SQLite persistence for saved recovery plans, selected demo options, and an audit trail.
 - Safe decision recording: rejects options that fail the model's constraints.
+- The browser UI lets travellers record a feasible option; it saves the proposal and decision to local SQLite and clearly confirms that no booking is made.
 - API documentation, input validation, and automated tests in GitHub Actions.
 
 ## Important data boundary

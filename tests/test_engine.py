@@ -42,6 +42,15 @@ def test_rejects_deadline_before_departure():
     })
     assert response.status_code == 422
 
+def test_homepage_exposes_feasible_option_decision_control():
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "data-choose-provider" in response.text
+    assert "chooseOption" in response.text
+    assert "No transport was booked" in response.text
+
+
 def test_saved_plan_history_and_decision_are_persisted(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "DB_PATH", tmp_path / "test.db")
     main.init_db()
