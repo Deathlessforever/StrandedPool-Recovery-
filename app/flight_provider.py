@@ -306,9 +306,9 @@ def flight_provider_status():
 
 @router.get("/search")
 async def search_flights(
+    departure_date: date,
     origin_airport: str = Query(min_length=3, max_length=3, pattern=r"^[A-Za-z]{3}$"),
     destination_airport: str = Query(min_length=3, max_length=3, pattern=r"^[A-Za-z]{3}$"),
-    departure_date: date,
     adults: int = Query(default=1, ge=1, le=9),
     budget: float | None = Query(default=None, gt=0),
 ):
