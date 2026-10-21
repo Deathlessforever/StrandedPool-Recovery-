@@ -32,6 +32,9 @@ def test_provider_status_does_not_overstate_live_integrations():
     assert data["transport_inventory"]["live_data_available"] is False
     assert data["current_weather"]["status"] == "implemented_on_demand"
     assert data["current_weather"]["connectivity"] == "not_checked_until_request"
+    assert data["booking_site_handoff"]["status"] == "implemented"
+    assert data["booking_site_handoff"]["inventory_checked"] is False
+    assert data["booking_actions"]["can_book"] is False
     assert data["weather_forecast"]["status"] == "implemented_on_demand"
     assert data["weather_forecast"]["maximum_days"] == 7
     assert data["driving_route_context"]["status"] == "implemented_on_demand"
