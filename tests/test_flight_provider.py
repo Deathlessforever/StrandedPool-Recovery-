@@ -1,0 +1,79 @@
+from datetime import date
+import os
+from fastapi.testclient import TestClient
+import app.flight_provider as flights
+from app.main import app
+
+client = TestClient(app)
+
+
+def test_flight_status_never_claims_live_without_credentials(monkeypatch):
+    monkeypatch.delenv("STRANDEDPOOL_DRCT_API_KEY", raising=False)
+    response = client.get("/api/flights/status")
+    assert response.status_code == 200
+    assert response.json()["status"] in {"credentials_required", "sandbox_test_only"}
+    assert response.json()["booking_enabled"] is False
+
+
+def test_flight_search_without_credentials_fails_closed(monkeypatch):
+    monkeypatch.delenv("STRANDEDPOOL_DRCT_API_KEY", raising=False)
+    response = client.get(
+        "/api/flights/search",
+        params={
+            "origin_airport": "BLR",
+            "destination_airport": "DEL",
+            "departure_date": "2026-12-15",
+            "adults": 1,
+        },
+    )
+    assert response.status_code == 503
+    assert "No simulated flights" in response.json()["detail"]
+
+
+def test_flight_search_rejects_same_airport():
+    response = client.get(
+        "/api/flights/search",
+        params={
+            "origin_airport": "BLR",
+            "destination_airport": "BLR",
+            "departure_date": "2026-12-15",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_provider_response_is_ranked_without_fabricating_missing_fields():
+    payload = {
+        "flights_options": [
+            {"id": "more-expensive", "price": {"amount": 9200, "currency": "INR"},
+             "duration": "5H 10M", "segments": ["s1", "s2"]},
+            {"id": "cheaper", "price": {"amount": 6100, "currency": "INR"},
+             "duration": "4H 25M", "segments": ["s3"]},
+            {"id": "unknown", "segments": ["s4"]},
+        ],
+        "segments": [
+            {"id": "s1"}, {"id": "s2"}, {"id": "s3"}, {"id": "s4"}
+        ],
+    }
+    results = flights._normalise_options(payload)
+    assert [item["provider_offer_id"] for item in results] == [
+        "cheaper", "more-expensive", "unknown"
+    ]
+    assert results[0]["fare"] == 6100
+    assert results[0]["duration_minutes"] == 265
+    assert results[0]["stops"] == 0
+    assert results[-1]["fare"] is None
+    assert results[-1]["duration_minutes"] is None
+    assert results[-1]["verification"] in {"LIVE_PROVIDER_RESPONSE", "SANDBOX_TEST_DATA"}
+    assert results[-1]["simulated"] is (flights.DRCT_SANDBOX)
+
+
+def test_provider_response_with_unrecognised_schema_is_not_replaced_by_demo():
+    from fastapi import HTTPException
+    try:
+        flights._normalise_options({"data": []})
+    except HTTPException as exc:
+        assert exc.status_code == 502
+        assert "no demo data was substituted" in exc.detail
+    else:
+        raise AssertionError("Unexpected provider schema should fail closed")
