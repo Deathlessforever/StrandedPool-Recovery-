@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException
 import httpx
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel, Field
-from app.flight_provider import router as flight_router
+from app.flight_provider import router as flight_router, flight_provider_status
 
 DB_PATH = Path(os.getenv("STRANDEDPOOL_DB", "strandedpool.db"))
 
@@ -361,6 +361,7 @@ def readiness():
 def provider_status():
     """Report integration capability without claiming unverified connectivity."""
     return {
+        "flight_search": flight_provider_status(),
         "transport_inventory": {
             "status": "simulated_only",
             "live_data_available": False,
