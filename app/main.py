@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException
 import httpx
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel, Field
+from app.flight_provider import router as flight_router
 
 DB_PATH = Path(os.getenv("STRANDEDPOOL_DB", "strandedpool.db"))
 
@@ -18,6 +19,9 @@ app = FastAPI(
     description="A working travel-disruption recovery MVP. Demo inventory is simulated, not live availability.",
     version="0.1.0",
 )
+
+# Flight search is a separate provider-backed path; demo planning remains explicitly simulated.
+app.include_router(flight_router)
 
 class Booking(BaseModel):
     origin: str = Field(default="Mysuru", min_length=1, max_length=80)
