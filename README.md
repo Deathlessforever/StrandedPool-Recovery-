@@ -7,8 +7,9 @@ This repository is an independent implementation. The original repository did no
 ## What works now
 
 - Responsive browser UI for entering an affected journey.
-- FastAPI backend with /health liveness, /health/ready database readiness, and POST /api/recovery/plan.
+- FastAPI backend with /health liveness, /health/ready database readiness, POST /api/recovery/plan, and a live current-weather endpoint.
 - Alternative ranking against budget, arrival deadline, and number of travellers.
+- Live current weather for the matched origin and destination cities via Open-Meteo, with provider failures shown instead of fabricated weather.
 - Simulated capacity checks and shared-ride pooling proposals.
 - Downstream booking risk reminders for hotels and onward pickups.
 - Copyable draft messages for hotel, pickup, and refund/assistance requests.
@@ -18,9 +19,9 @@ This repository is an independent implementation. The original repository did no
 
 ## Important data boundary
 
-**All providers, times, fares, seats, and alternatives are simulated demo data.** This version does not fetch live rail/bus/flight inventory, weather, route times, or hotel availability. It does not book, cancel, send messages, or process refunds. Confirm details directly with the relevant provider before travelling.
+**Transport providers, schedules, fares, seats, and alternatives are simulated demo data.** The app now fetches current conditions for a matched city from Open-Meteo, but it does not provide route forecasts, official severe-weather alerts, live rail/bus/flight inventory, route times, or hotel availability. A weather lookup failure is returned as an error; demo weather is never substituted. It does not book, cancel, send messages, or process refunds. Confirm details directly with the relevant provider before travelling.
 
-The demo data exists to make the workflow usable and testable while authorized provider APIs and partnerships are evaluated. Live availability, payment, booking, and automated rebooking are not implemented.
+The demo transport data exists to make the workflow usable and testable while authorized provider APIs and partnerships are evaluated. Current city weather is fetched from Open-Meteo. Live transport availability, payment, booking, and automated rebooking are not implemented.
 
 ## Run locally
 
@@ -88,6 +89,10 @@ curl -X POST http://127.0.0.1:8000/api/recovery/plan \
 
 Response includes ranked alternatives, feasibility reasons, pool proposals, downstream risks, and draft messages. Every alternative has simulated=true and the response identifies its data mode.
 
+### Current weather
+
+`GET /api/weather/current?city=Mysuru` geocodes the supplied city and returns current conditions from Open-Meteo. The response labels the data as live and includes the matched location and observation time. The UI displays current conditions for the matched origin and destination after a plan is generated. This is not a route forecast or official travel advisory; verify warnings with official sources. If the provider fails, the endpoint returns an error instead of inventing a weather result.
+
 ## Saved plans and audit history
 
 - `POST /api/recovery/saved-plans` — generate and save a proposal to local SQLite.
@@ -136,7 +141,7 @@ The score is a demo heuristic, not a probability or a guarantee. A recommendatio
 
 ## Next steps for a production-grade system
 
-- Integrate authorized, documented transport and weather data providers.
+- Integrate authorized, documented transport data providers and add forecast/official-alert sources for route-relevant weather.
 - Track data provenance, freshness, and whether each result is live, cached, or simulated.
 - Replace demo candidates with normalized provider results and handle API outages/rate limits.
 - Add persistence, consent, authentication, and privacy controls for booking information.
