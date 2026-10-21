@@ -10,6 +10,7 @@ This repository is an independent implementation. The original repository did no
 - FastAPI backend with /health liveness, /health/ready database readiness, POST /api/recovery/plan, and a live current-weather endpoint.
 - Alternative ranking against budget, arrival deadline, and number of travellers.
 - Live current weather for the matched origin and destination cities via Open-Meteo, with provider failures shown instead of fabricated weather.
+- Estimated road-driving distance and duration from Open-Meteo geocoding and the OSRM public routing service, clearly separated from simulated public-transport options.
 - Provider-status endpoint that clearly distinguishes simulated transport inventory, on-demand weather integration, and unavailable booking actions.
 - Simulated capacity checks and shared-ride pooling proposals.
 - Downstream booking risk reminders for hotels and onward pickups.
@@ -20,9 +21,9 @@ This repository is an independent implementation. The original repository did no
 
 ## Important data boundary
 
-**Transport providers, schedules, fares, seats, and alternatives are simulated demo data.** The app now fetches current conditions for a matched city from Open-Meteo, but it does not provide route forecasts, official severe-weather alerts, live rail/bus/flight inventory, route times, or hotel availability. A weather lookup failure is returned as an error; demo weather is never substituted. It does not book, cancel, send messages, or process refunds. Confirm details directly with the relevant provider before travelling.
+**Transport providers, schedules, fares, seats, and alternatives are simulated demo data.** The app fetches current conditions for matched cities from Open-Meteo and estimated road-driving distance/duration from OSRM. Driving estimates are not public-transport schedules and are not guaranteed to reflect live traffic. The app does not provide route weather forecasts, official severe-weather alerts, live rail/bus/flight inventory, hotel availability, or verified seat counts. Provider failures are shown as errors; demo weather or route estimates are never substituted. It does not book, cancel, send messages, or process refunds. Confirm details directly with the relevant provider before travelling.
 
-The demo transport data exists to make the workflow usable and testable while authorized provider APIs and partnerships are evaluated. Current city weather is fetched from Open-Meteo. Live transport availability, payment, booking, and automated rebooking are not implemented.
+The demo transport data exists to make the workflow usable and testable while authorized provider APIs and partnerships are evaluated. Current city weather and road-driving route estimates are fetched from external services on demand. Live transport availability, payment, booking, and automated rebooking are not implemented.
 
 ## Run locally
 
@@ -92,7 +93,11 @@ Response includes ranked alternatives, feasibility reasons, pool proposals, down
 
 ### Provider status
 
-`GET /api/providers/status` reports what is actually implemented. Transport inventory is marked simulated-only, current weather is marked implemented but its connectivity is checked only when requested, and booking/cancellation/provider messaging are explicitly marked not implemented.
+`GET /api/providers/status` reports what is actually implemented. Transport inventory is marked simulated-only, current weather and driving-route context are marked implemented on demand, and booking/cancellation/provider messaging are explicitly marked not implemented.
+
+### Driving route context
+
+`GET /api/route/driving?origin=Mysuru&destination=Mangaluru` geocodes both places and requests a road route from the OSRM public routing service. It returns distance and estimated driving duration. This is not a public-transport timetable, not a traffic-aware arrival guarantee, and not an official travel advisory. Provider errors are returned rather than replaced with fabricated route values.
 
 ### Current weather
 
