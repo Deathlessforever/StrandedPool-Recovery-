@@ -281,3 +281,51 @@ async def search_flights(
         "booking_completed": False,
         "note": "Offers are provider responses, not guaranteed seats. Reprice with the provider before purchase. This endpoint searches only; it does not create orders, issue tickets, cancel, or charge payment. Transfer duration and exact availability are shown only if provider fields expose them; they are never invented.",
     }
+
+
+@router.post("/reprice/{offer_id}")
+async def reprice_flight_offer(offer_id: str):
+    """Ask DRCT to revalidate a previously returned offer before the traveller acts."""
+    if not offer_id or len(offer_id) > 300:
+        raise HTTPException(status_code=422, detail="Invalid provider offer ID.")
+    api_key = os.getenv(DRCT_API_KEY_ENV)
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Flight provider credentials are not configured; offer was not revalidated.")
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "DRCT-Version": DRCT_VERSION,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=5.0)) as client:
+            response = await client.patch(
+                f"{DRCT_BASE_URL}/offers/{offer_id}/price",
+                headers=headers,
+                json={},
+            )
+    except httpx.TimeoutException as exc:
+        raise HTTPException(status_code=504, detail="Provider repricing timed out; offer remains unverified.") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Could not revalidate offer with provider.") from exc
+    if response.status_code in (401, 403):
+        raise HTTPException(status_code=502, detail="Provider rejected the configured credentials.")
+    if response.status_code == 404:
+        raise HTTPException(status_code=409, detail="Provider offer no longer exists; search again.")
+    if response.status_code == 429:
+        raise HTTPException(status_code=503, detail="Provider rate limit reached; retry later.")
+    if response.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"Provider repricing failed with HTTP {response.status_code}.")
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail="Provider repricing returned invalid JSON.") from exc
+    return {
+        "provider": "DRCT",
+        "provider_offer_id": offer_id,
+        "data_mode": "SANDBOX_TEST_DATA" if DRCT_SANDBOX else "LIVE PROVIDER REPRICE",
+        "verification": "SANDBOX_ONLY_NOT_REAL" if DRCT_SANDBOX else "REPRICED_BY_PROVIDER",
+        "booking_completed": False,
+        "provider_response": payload,
+        "note": "This is a provider reprice response, not a booking or ticket. Confirm the provider's response and terms before proceeding.",
+    }
