@@ -179,7 +179,11 @@ def _segment_count(option: dict, response: dict) -> int | None:
     return None
 
 
-def _normalise_options(payload: dict) -> list[dict]:
+def _normalise_options(payload: dict | list) -> list[dict]:
+    if payload == []:
+        return []
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=502, detail="Unexpected flight provider response; no demo data was substituted.")
     raw_options = payload.get("flights_options")
     if not isinstance(raw_options, list):
         raise HTTPException(
@@ -355,7 +359,7 @@ async def search_flights(
         payload = response.json()
     except ValueError as exc:
         raise HTTPException(status_code=502, detail="Flight provider returned invalid JSON; no fallback results were generated.") from exc
-    if not isinstance(payload, dict):
+    if not isinstance(payload, dict) and payload != []:
         raise HTTPException(status_code=502, detail="Unexpected flight provider response; no fallback results were generated.")
 
     options = _normalise_options(payload)
