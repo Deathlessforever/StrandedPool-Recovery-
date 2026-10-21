@@ -104,3 +104,10 @@ def test_normalises_documented_drct_offer_shape_and_transfer_time():
     assert item["stops"] == 1
     assert item["transfer_minutes"] == 30
     assert item["availability_status"] == "provider_offer_returned_unrepriced"
+
+
+def test_reprice_without_credentials_fails_closed(monkeypatch):
+    monkeypatch.delenv("STRANDEDPOOL_DRCT_API_KEY", raising=False)
+    response = client.post("/api/flights/reprice/LH_test_offer")
+    assert response.status_code == 503
+    assert "not revalidated" in response.json()["detail"]
