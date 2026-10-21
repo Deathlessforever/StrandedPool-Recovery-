@@ -44,6 +44,9 @@ def _parse_datetime(value: Any) -> datetime | None:
 def _duration_minutes(option: dict, response: dict) -> int | None:
     """Use explicit provider duration first, otherwise derive from segment times."""
     for item in _walk_dicts(option):
+        journey_seconds = item.get("journey_time")
+        if isinstance(journey_seconds, (int, float)) and journey_seconds >= 0:
+            return int(journey_seconds // 60)
         for key in ("duration_minutes", "total_duration_minutes", "duration_min"):
             if isinstance(item.get(key), (int, float)):
                 return int(item[key])
@@ -182,35 +185,75 @@ def _normalise_options(payload: dict) -> list[dict]:
             status_code=502,
             detail="Flight provider response did not contain a recognised flights_options list; no demo data was substituted.",
         )
+    top_flights = payload.get("flights", [])
+    top_segments = payload.get("segments", [])
+    flights_by_id = {item.get("id"): item for item in top_flights
+                     if isinstance(item, dict) and item.get("id")} if isinstance(top_flights, list) else {}
+    segments_by_id = {item.get("id"): item for item in top_segments
+                      if isinstance(item, dict) and item.get("id")} if isinstance(top_segments, list) else {}
     results = []
-    for index, option in enumerate(raw_options):
+
+    for option_index, option in enumerate(raw_options):
         if not isinstance(option, dict):
             continue
-        fare, currency = _fare_value(option, payload)
-        duration = _duration_minutes(option, payload)
-        segment_count = _segment_count(option, payload)
-        stops = max(0, segment_count - 1) if segment_count is not None else None
-        transfer_minutes = _transfer_minutes(option, payload)
-        # A returned offer is evidence that the provider returned an offer, not a
-        # promise that seats remain bookable later. Reprice before any booking.
-        results.append({
-            "provider": "DRCT",
-            "provider_offer_id": option.get("id") or option.get("offer_id") or f"response-option-{index + 1}",
-            "fare": fare,
-            "currency": currency,
-            "duration_minutes": duration,
-            "segments": segment_count,
-            "stops": stops,
-            "transfer_minutes": transfer_minutes,
-            "availability_status": "provider_offer_returned_reprice_before_booking",
-            "verification": "LIVE_PROVIDER_RESPONSE" if not DRCT_SANDBOX else "SANDBOX_TEST_DATA",
-            "simulated": DRCT_SANDBOX,
-            "rank": None,
-            "ranking_note": None,
-            "raw_offer": option,
-        })
-    # Rank only on provider-supplied comparable facts. Missing fares/durations
-    # are not invented and sort behind offers with those facts.
+        refs = option.get("flights", [])
+        if isinstance(refs, list):
+            linked_flights = [flights_by_id[ref] for ref in refs if isinstance(ref, str) and ref in flights_by_id]
+            linked_flights += [ref for ref in refs if isinstance(ref, dict)]
+        else:
+            linked_flights = []
+        offers = option.get("offers") if isinstance(option.get("offers"), list) else []
+        if not offers:
+            for flight in linked_flights:
+                if isinstance(flight.get("offers"), list):
+                    offers.extend(flight["offers"])
+        # Some response versions put the offer fields directly on the option.
+        if not offers:
+            offers = [option]
+
+        for offer_index, offer in enumerate(offers):
+            if not isinstance(offer, dict):
+                continue
+            fare, currency = _fare_value(offer, payload)
+            duration_values = []
+            segment_refs = []
+            for flight in linked_flights:
+                seconds = flight.get("journey_time")
+                if isinstance(seconds, (int, float)) and seconds >= 0:
+                    duration_values.append(int(seconds // 60))
+                segment_list = flight.get("segments", [])
+                if isinstance(segment_list, list):
+                    segment_refs.extend(segment_list)
+            duration = sum(duration_values) if duration_values else _duration_minutes(offer, payload)
+            if duration is None:
+                duration = _duration_minutes(option, payload)
+            if segment_refs:
+                segment_count = sum(1 for ref in segment_refs if ref in segments_by_id) or len(segment_refs)
+                transfer_minutes = _transfer_minutes({"segments": segment_refs}, {"segments": list(segments_by_id.values())})
+            else:
+                segment_count = _segment_count(offer, payload)
+                transfer_minutes = _transfer_minutes(offer, payload)
+            stops = max(0, segment_count - 1) if segment_count is not None else None
+            offer_id = offer.get("id") or offer.get("offer_id") or option.get("id")
+            if not offer_id:
+                offer_id = f"response-option-{option_index + 1}-offer-{offer_index + 1}"
+            results.append({
+                "provider": "DRCT",
+                "provider_offer_id": offer_id,
+                "fare": fare,
+                "currency": currency,
+                "duration_minutes": duration,
+                "segments": segment_count,
+                "stops": stops,
+                "transfer_minutes": transfer_minutes,
+                "availability_status": "provider_offer_returned_reprice_before_booking",
+                "verification": "LIVE_PROVIDER_RESPONSE" if not DRCT_SANDBOX else "SANDBOX_TEST_DATA",
+                "simulated": DRCT_SANDBOX,
+                "rank": None,
+                "ranking_note": None,
+                "raw_offer": offer,
+            })
+
     results.sort(key=lambda item: (
         item["fare"] is None,
         item["duration_minutes"] is None,
@@ -222,7 +265,7 @@ def _normalise_options(payload: dict) -> list[dict]:
     for index, item in enumerate(results, start=1):
         item["rank"] = index
         item["ranking_note"] = (
-            "Sorted by provider fare, then total duration, then stops; unavailable fields are not estimated."
+            "Sorted by provider fare, then total journey duration, then provider-derived transfer time, then stops; missing fields are not estimated."
             if item["fare"] is not None and item["duration_minutes"] is not None
             else "Partial provider data: missing fare or duration is not fabricated; verify details with the provider."
         )
@@ -346,7 +389,6 @@ async def reprice_flight_offer(offer_id: str):
             response = await client.patch(
                 f"{DRCT_BASE_URL}/offers/{offer_id}/price",
                 headers=headers,
-                json={},
             )
     except httpx.TimeoutException as exc:
         raise HTTPException(status_code=504, detail="Provider repricing timed out; offer remains unverified.") from exc
