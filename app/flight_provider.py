@@ -229,7 +229,9 @@ def _normalise_options(payload: dict) -> list[dict]:
                 duration = _duration_minutes(option, payload)
             if segment_refs:
                 segment_count = sum(1 for ref in segment_refs if ref in segments_by_id) or len(segment_refs)
-                transfer_minutes = _transfer_minutes({"segments": segment_refs}, {"segments": list(segments_by_id.values())})
+                resolved_segments = [segments_by_id[ref] for ref in segment_refs if ref in segments_by_id]
+                transfer_seconds = [segment.get("transfer_time") for segment in resolved_segments if isinstance(segment.get("transfer_time"), (int, float)) and segment.get("transfer_time") >= 0]
+                transfer_minutes = int(sum(transfer_seconds) // 60) if transfer_seconds else _transfer_minutes({"segments": segment_refs}, {"segments": list(segments_by_id.values())})
             else:
                 segment_count = _segment_count(offer, payload)
                 transfer_minutes = _transfer_minutes(offer, payload)
@@ -246,8 +248,8 @@ def _normalise_options(payload: dict) -> list[dict]:
                 "segments": segment_count,
                 "stops": stops,
                 "transfer_minutes": transfer_minutes,
-                "availability_status": "provider_offer_returned_reprice_before_booking",
-                "verification": "LIVE_PROVIDER_RESPONSE" if not DRCT_SANDBOX else "SANDBOX_TEST_DATA",
+                "availability_status": "provider_offer_returned_unrepriced",
+                "verification": "PROVIDER_SEARCH_RESULT_UNPRICED" if not DRCT_SANDBOX else "SANDBOX_TEST_DATA",
                 "simulated": DRCT_SANDBOX,
                 "rank": None,
                 "ranking_note": None,
