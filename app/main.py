@@ -7,6 +7,7 @@ import os
 import sqlite3
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
+import httpx
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -287,6 +288,107 @@ def readiness():
         "ok": True,
         "database": "reachable",
         "data_mode": "SIMULATED DEMO DATA",
+    }
+
+WEATHER_CODES = {
+    0: "Clear sky",
+    1: "Mainly clear",
+    2: "Partly cloudy",
+    3: "Overcast",
+    45: "Fog",
+    48: "Depositing rime fog",
+    51: "Light drizzle",
+    53: "Moderate drizzle",
+    55: "Dense drizzle",
+    56: "Light freezing drizzle",
+    57: "Dense freezing drizzle",
+    61: "Slight rain",
+    63: "Moderate rain",
+    65: "Heavy rain",
+    66: "Light freezing rain",
+    67: "Heavy freezing rain",
+    71: "Slight snowfall",
+    73: "Moderate snowfall",
+    75: "Heavy snowfall",
+    77: "Snow grains",
+    80: "Slight rain showers",
+    81: "Moderate rain showers",
+    82: "Violent rain showers",
+    85: "Slight snow showers",
+    86: "Heavy snow showers",
+    95: "Thunderstorm",
+    96: "Thunderstorm with slight hail",
+    99: "Thunderstorm with heavy hail",
+}
+
+@app.get("/api/weather/current")
+async def current_weather(city: str):
+    """Fetch current conditions for a city from Open-Meteo; never substitutes demo weather."""
+    city = city.strip()
+    if not city or len(city) > 100:
+        raise HTTPException(status_code=422, detail="City must be between 1 and 100 characters")
+
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            geo_response = await client.get(
+                "https://geocoding-api.open-meteo.com/v1/search",
+                params={"name": city, "count": 1, "language": "en", "format": "json"},
+            )
+            geo_response.raise_for_status()
+            locations = geo_response.json().get("results") or []
+            if not locations:
+                raise HTTPException(status_code=404, detail=f"No location found for '{city}'")
+
+            location = locations[0]
+            weather_response = await client.get(
+                "https://api.open-meteo.com/v1/forecast",
+                params={
+                    "latitude": location["latitude"],
+                    "longitude": location["longitude"],
+                    "current": (
+                        "temperature_2m,relative_humidity_2m,apparent_temperature,"
+                        "is_day,precipitation,rain,showers,snowfall,weather_code,wind_speed_10m"
+                    ),
+                    "timezone": "auto",
+                },
+            )
+            weather_response.raise_for_status()
+            current = weather_response.json().get("current")
+            if not current:
+                raise HTTPException(status_code=502, detail="Weather provider returned no current conditions")
+    except HTTPException:
+        raise
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Live weather provider is temporarily unavailable; no weather estimate was substituted",
+        ) from exc
+
+    code = current.get("weather_code")
+    return {
+        "data_mode": "LIVE WEATHER DATA",
+        "provider": "Open-Meteo",
+        "location": {
+            "name": location.get("name", city),
+            "country": location.get("country"),
+            "latitude": location["latitude"],
+            "longitude": location["longitude"],
+        },
+        "observed_at": current.get("time"),
+        "current": {
+            "condition": WEATHER_CODES.get(code, "Unknown conditions"),
+            "weather_code": code,
+            "temperature_c": current.get("temperature_2m"),
+            "feels_like_c": current.get("apparent_temperature"),
+            "relative_humidity_percent": current.get("relative_humidity_2m"),
+            "precipitation_mm": current.get("precipitation"),
+            "wind_speed_kmh": current.get("wind_speed_10m"),
+            "is_day": current.get("is_day"),
+        },
+        "note": (
+            "These are current conditions at the matched city, not a route forecast or official travel alert. "
+            "Check official weather and transport advisories before travelling."
+        ),
     }
 
 @app.post("/api/recovery/plan", response_model=RecoveryPlan)
