@@ -99,6 +99,10 @@ def parse_time(value: str) -> datetime:
         raise ValueError("Times must use local ISO format, e.g. 2026-10-21T09:00")
 
 def build_plan(req: Booking) -> RecoveryPlan:
+    if not req.origin.strip() or not req.destination.strip():
+        raise ValueError("Origin and destination must not be blank")
+    if req.origin.strip().casefold() == req.destination.strip().casefold():
+        raise ValueError("Origin and destination must be different places")
     departure = parse_time(req.departure_time)
     deadline = parse_time(req.arrival_deadline)
     # Mixing local (naive) and timezone-aware timestamps makes comparisons
@@ -288,6 +292,29 @@ def readiness():
         "ok": True,
         "database": "reachable",
         "data_mode": "SIMULATED DEMO DATA",
+    }
+
+@app.get("/api/providers/status")
+def provider_status():
+    """Report integration capability without claiming unverified connectivity."""
+    return {
+        "transport_inventory": {
+            "status": "simulated_only",
+            "live_data_available": False,
+            "details": "Transport candidates, prices, schedules, and seats are demo fixtures.",
+        },
+        "current_weather": {
+            "status": "implemented_on_demand",
+            "provider": "Open-Meteo",
+            "api_key_required": False,
+            "connectivity": "not_checked_until_request",
+        },
+        "booking_actions": {
+            "status": "not_implemented",
+            "can_book": False,
+            "can_cancel": False,
+            "can_message_providers": False,
+        },
     }
 
 WEATHER_CODES = {
