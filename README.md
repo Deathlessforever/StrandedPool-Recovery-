@@ -19,6 +19,7 @@ This repository is an independent implementation. The original repository did no
 - SQLite persistence for saved recovery plans, selected demo options, and an audit trail.
 - Safe decision recording: rejects options that fail the model's constraints.
 - The browser UI lets travellers record a feasible option; it saves the proposal and decision to local SQLite and clearly confirms that no booking is made.
+- Download a plain-text summary of a saved plan, including ranked options, constraint notes, downstream reminders, draft messages, and any recorded choice.
 - API documentation, input validation, and automated tests in GitHub Actions.
 
 ## Important data boundary
@@ -116,6 +117,7 @@ Response includes ranked alternatives, feasibility reasons, pool proposals, down
 - `GET /api/recovery/saved-plans/{id}` — retrieve a proposal and its audit events.
 - `POST /api/recovery/saved-plans/{id}/resolve` — record a feasible option chosen by the traveller. This records a decision only; it does not book transport.
 - `GET /api/recovery/saved-plans/{id}/audit` — read the audit trail.
+- `GET /api/recovery/saved-plans/{id}/export.txt` — download a plain-text recovery summary; clearly labels simulated options and confirms that no booking is performed.
 
 The browser interface also has controls to save a plan and review saved history. SQLite is stored in `strandedpool.db` by default; set `STRANDEDPOOL_DB` to choose another path.
 

@@ -51,6 +51,39 @@ def test_homepage_exposes_feasible_option_decision_control():
     assert "No transport was booked" in response.text
 
 
+def test_saved_plan_can_be_exported_as_plain_text(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "export.db")
+    main.init_db()
+    response = client.post("/api/recovery/saved-plans", json={
+        "origin": "Mysuru", "destination": "Mangaluru",
+        "departure_time": "2026-10-21T09:00",
+        "arrival_deadline": "2026-10-21T18:00",
+        "budget_inr": 1500, "travellers": 2,
+        "disruption": "cancelled", "include_pooling": True,
+    })
+    assert response.status_code == 200
+    plan_id = response.json()["plan_id"]
+
+    exported = client.get(f"/api/recovery/saved-plans/{plan_id}/export.txt")
+
+    assert exported.status_code == 200
+    assert exported.headers["content-type"].startswith("text/plain")
+    assert f'filename="strandedpool-recovery-{plan_id}.txt"' in exported.headers["content-disposition"]
+    assert "STRANDEDPOOL RECOVERY SUMMARY" in exported.text
+    assert "simulated demo data" in exported.text
+    assert "No transport has been booked or cancelled" in exported.text
+    assert "DRAFT ACTION MESSAGES" in exported.text
+
+
+def test_export_unknown_saved_plan_returns_404(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "empty-export.db")
+    main.init_db()
+
+    response = client.get("/api/recovery/saved-plans/12345/export.txt")
+
+    assert response.status_code == 404
+
+
 def test_saved_plan_history_and_decision_are_persisted(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "DB_PATH", tmp_path / "test.db")
     main.init_db()

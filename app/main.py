@@ -8,7 +8,7 @@ import sqlite3
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 import httpx
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 DB_PATH = Path(os.getenv("STRANDEDPOOL_DB", "strandedpool.db"))
@@ -262,6 +262,65 @@ def resolve_saved_plan(plan_id: int, request: ResolutionRequest):
         "selected_provider": request.selected_provider,
         "note": "Decision saved locally only. No transport was booked and no provider was contacted."
     }
+
+
+@app.get("/api/recovery/saved-plans/{plan_id}/export.txt")
+def export_saved_plan(plan_id: int):
+    """Download a plain-text recovery summary; no booking is performed."""
+    with db_connect() as connection:
+        row = connection.execute("SELECT * FROM saved_plans WHERE id = ?", (plan_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Saved recovery plan not found")
+
+    plan = json.loads(row["plan_json"])
+    journey = plan.get("original_journey", {})
+    lines = [
+        "STRANDEDPOOL RECOVERY SUMMARY",
+        "=" * 32,
+        f"Plan ID: {row['id']}",
+        f"Created (UTC): {row['created_at']}",
+        f"Status: {row['status']}",
+        f"Journey: {journey.get('origin', row['origin'])} -> {journey.get('destination', row['destination'])}",
+        f"Departure: {journey.get('departure', 'Not provided')}",
+        f"Arrival deadline: {journey.get('arrival_deadline', 'Not provided')}",
+        f"Travellers: {journey.get('travellers', 'Not provided')}",
+        f"Budget per traveller (INR): {journey.get('budget_inr', 'Not provided')}",
+        "",
+        "IMPORTANT: transport alternatives, prices, schedules, and seats are simulated demo data.",
+        "This file is a planning aid only. No transport has been booked or cancelled.",
+        "",
+        "RANKED ALTERNATIVES",
+        "-" * 20,
+    ]
+    for option in plan.get("alternatives", []):
+        lines.extend([
+            f"{option.get('mode')} — {option.get('provider')}",
+            f"  Departure: {option.get('departure')} | Arrival: {option.get('arrival')}",
+            f"  Duration: {option.get('duration_minutes')} min | Cost: INR {option.get('cost_per_person_inr')} per person",
+            f"  Feasible against demo constraints: {'yes' if option.get('feasible') else 'no'}",
+            f"  Demo seats: {option.get('available_seats')}",
+        ])
+        if option.get("reasons"):
+            lines.append("  Reasons: " + "; ".join(option["reasons"]))
+    lines.extend(["", "DOWNSTREAM REMINDERS", "-" * 20])
+    for risk in plan.get("downstream_risks", []):
+        lines.append(f"- {risk.get('booking')} ({risk.get('risk')}): {risk.get('suggested_action')}")
+    lines.extend(["", "DRAFT ACTION MESSAGES", "-" * 21])
+    for action in plan.get("action_pack", []):
+        lines.extend([f"{action.get('title')}:", action.get("text", ""), ""])
+    if row["selected_provider"]:
+        lines.extend([
+            "RECORDED CHOICE",
+            "-" * 15,
+            f"Selected demo option: {row['selected_provider']}",
+            f"Decision note: {row['decision_note'] or ''}",
+            "This is a recorded preference, not a reservation.",
+        ])
+    lines.extend(["", "Verify schedules, fares, seats, and advisories directly with official providers before travel."])
+    return PlainTextResponse(
+        "\n".join(lines),
+        headers={"Content-Disposition": f'attachment; filename="strandedpool-recovery-{plan_id}.txt"'},
+    )
 
 @app.get("/api/recovery/saved-plans/{plan_id}/audit")
 def get_plan_audit(plan_id: int):
@@ -635,9 +694,9 @@ results.innerHTML='<h2>Recovery plan</h2><p class="muted">'+esc(d.disruption_sum
 window.loadDrivingRoute=async(origin,destination)=>{const target=document.querySelector('#driving-route');if(!target)return;try{const r=await fetch('/api/route/driving?origin='+encodeURIComponent(origin)+'&destination='+encodeURIComponent(destination));const d=await r.json();if(!r.ok)throw new Error(d.detail||'Route provider unavailable');target.innerHTML='<article class="option"><span class="tag">LIVE ROUTING ESTIMATE · '+esc(d.provider)+'</span><h3>'+esc(d.origin.name)+' → '+esc(d.destination.name)+'</h3><div class="money">'+esc(d.distance_km)+' km</div><p>Estimated driving time: '+esc(d.estimated_driving_minutes)+' min</p><p class="muted">'+esc(d.note)+'</p></article>'}catch(e){target.innerHTML='<article class="option"><p class="bad">'+esc(e.message||'Driving-route provider unavailable')+'</p><p class="muted">No route estimate was substituted.</p></article>'}};
 window.loadCurrentWeather=async(origin,destination)=>{const target=document.querySelector('#weather');if(!target)return;const cities=[...new Set([origin,destination])];const items=await Promise.all(cities.map(async city=>{try{const r=await fetch('/api/weather/current?city='+encodeURIComponent(city));const data=await r.json();return r.ok?data:{error:data.detail||'Weather provider unavailable',city}}catch(e){return {error:'Could not connect to the live weather endpoint',city}}}));target.innerHTML=items.map(w=>{if(w.error)return '<article class="option"><h3>'+esc(w.city)+'</h3><p class="bad">'+esc(w.error)+'</p><p class="muted">No demo weather substituted.</p></article>';const v=w.current;return '<article class="option"><span class="tag">LIVE · '+esc(w.provider)+'</span><h3>'+esc(w.location.name)+(w.location.country?', '+esc(w.location.country):'')+'</h3><div class="money">'+esc(v.temperature_c)+'°C</div><p>'+esc(v.condition)+' · feels like '+esc(v.feels_like_c)+'°C</p><p>'+esc(v.relative_humidity_percent)+'% humidity · wind '+esc(v.wind_speed_kmh)+' km/h</p><p>Precipitation: '+esc(v.precipitation_mm)+' mm</p><p class="muted">Observed: '+esc(w.observed_at||'time not provided')+'</p></article>'}).join('')+'<p class="muted">Weather source: Open-Meteo. Current city conditions do not replace official alerts or a route forecast.</p>'};
 window.loadWeatherForecast=async(origin,destination)=>{const target=document.querySelector('#weather-forecast');if(!target)return;const cities=[...new Set([origin,destination])];const items=await Promise.all(cities.map(async city=>{try{const r=await fetch('/api/weather/forecast?city='+encodeURIComponent(city)+'&days=3');const data=await r.json();return r.ok?data:{error:data.detail||'Forecast provider unavailable',city}}catch(e){return {error:'Could not connect to the forecast endpoint',city}}}));target.innerHTML=items.map(w=>{if(w.error)return '<article class="option"><h3>'+esc(w.city)+'</h3><p class="bad">'+esc(w.error)+'</p><p class="muted">No forecast was substituted.</p></article>';return '<article class="option"><span class="tag">LIVE FORECAST · '+esc(w.provider)+'</span><h3>'+esc(w.location.name)+(w.location.country?', '+esc(w.location.country):'')+'</h3>'+w.forecast_days.map(d=>'<div class="action"><strong>'+esc(d.date)+' · '+esc(d.condition)+'</strong><p>'+esc(d.temperature_2m_min)+'°C to '+esc(d.temperature_2m_max)+'°C</p><p>Precipitation chance: '+esc(d.precipitation_probability_max??'N/A')+'% · rainfall '+esc(d.precipitation_sum??'N/A')+' mm</p><p>Max wind: '+esc(d.wind_speed_10m_max??'N/A')+' km/h</p></div>').join('')+'<p class="muted">'+esc(w.note)+'</p></article>'}).join('')};
-window.savePlan=async()=>{if(!lastPayload){alert('Build a plan first');return}try{const r=await fetch('/api/recovery/saved-plans',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(lastPayload)});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Save failed');alert('Saved recovery plan #'+d.plan_id);await loadHistory()}catch(e){alert(e.message||'Save failed')}};window.chooseOption=async(provider)=>{if(decisionInProgress)return;if(!lastPayload){alert('Build a plan first');return}decisionInProgress=true;try{if(!currentPlanId){const saved=await fetch('/api/recovery/saved-plans',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(lastPayload)});const savedData=await saved.json();if(!saved.ok)throw new Error(savedData.detail||'Could not save recovery plan');currentPlanId=savedData.plan_id}const response=await fetch('/api/recovery/saved-plans/'+currentPlanId+'/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({selected_provider:provider,decision_note:'Choice recorded from the recovery workspace UI'})});const data=await response.json();if(!response.ok)throw new Error(data.detail||'Could not record choice');alert('Choice recorded for recovery plan #'+currentPlanId+'. No transport was booked.');await loadHistory()}catch(e){alert(e.message||'Could not record choice')}finally{decisionInProgress=false}};
+window.savePlan=async()=>{if(!lastPayload){alert('Build a plan first');return}try{const r=await fetch('/api/recovery/saved-plans',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(lastPayload)});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Save failed');currentPlanId=d.plan_id;alert('Saved recovery plan #'+d.plan_id);await loadHistory()}catch(e){alert(e.message||'Save failed')}};window.chooseOption=async(provider)=>{if(decisionInProgress)return;if(!lastPayload){alert('Build a plan first');return}decisionInProgress=true;try{if(!currentPlanId){const saved=await fetch('/api/recovery/saved-plans',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(lastPayload)});const savedData=await saved.json();if(!saved.ok)throw new Error(savedData.detail||'Could not save recovery plan');currentPlanId=savedData.plan_id}const response=await fetch('/api/recovery/saved-plans/'+currentPlanId+'/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({selected_provider:provider,decision_note:'Choice recorded from the recovery workspace UI'})});const data=await response.json();if(!response.ok)throw new Error(data.detail||'Could not record choice');alert('Choice recorded for recovery plan #'+currentPlanId+'. No transport was booked.');await loadHistory()}catch(e){alert(e.message||'Could not record choice')}finally{decisionInProgress=false}};
 results.addEventListener('click',event=>{const button=event.target.closest('[data-choose-provider]');if(button)window.chooseOption(button.dataset.chooseProvider)});
 
-window.loadHistory=async()=>{const target=document.querySelector('#history');if(!target)return;target.innerHTML='<p>Loading saved plans…</p>';try{const r=await fetch('/api/recovery/saved-plans');const d=await r.json();target.innerHTML='<h3>Saved recovery history</h3>'+(d.items.length?d.items.map(p=>'<div class="action"><strong>#'+p.id+' · '+esc(p.origin)+' → '+esc(p.destination)+'</strong><p>'+esc(p.status)+' · '+esc(p.created_at)+'</p>'+(p.selected_provider?'<p>Selected demo option: '+esc(p.selected_provider)+'</p>':'')+'<a href="/api/recovery/saved-plans/'+p.id+'" target="_blank" rel="noreferrer">Open plan details and audit log</a></div>').join(''):'<p>No saved plans yet.</p>')}catch(e){target.innerHTML='<p>Could not load saved history.</p>'}};
+window.loadHistory=async()=>{const target=document.querySelector('#history');if(!target)return;target.innerHTML='<p>Loading saved plans…</p>';try{const r=await fetch('/api/recovery/saved-plans');const d=await r.json();target.innerHTML='<h3>Saved recovery history</h3>'+(d.items.length?d.items.map(p=>'<div class="action"><strong>#'+p.id+' · '+esc(p.origin)+' → '+esc(p.destination)+'</strong><p>'+esc(p.status)+' · '+esc(p.created_at)+'</p>'+(p.selected_provider?'<p>Selected demo option: '+esc(p.selected_provider)+'</p>':'')+'<a href="/api/recovery/saved-plans/'+p.id+'" target="_blank" rel="noreferrer">Open plan details and audit log</a> · <a href="/api/recovery/saved-plans/'+p.id+'/export.txt">Download summary</a></div>').join(''):'<p>No saved plans yet.</p>')}catch(e){target.innerHTML='<p>Could not load saved history.</p>'}};
 window.copyMsg=async i=>{const t=document.querySelector('#msg'+i).textContent;try{await navigator.clipboard.writeText(t);alert('Message copied')}catch(e){alert('Copy failed — select the text and copy manually')}};
 </script></body></html>""")
