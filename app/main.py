@@ -58,6 +58,8 @@ class ResolutionRequest(BaseModel):
     decision_note: str = Field(default="", max_length=1000)
 
 def db_connect():
+    # Allow deployments to place the SQLite file in a dedicated data directory.
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(DB_PATH)
     connection.row_factory = sqlite3.Row
     return connection
@@ -98,6 +100,14 @@ def parse_time(value: str) -> datetime:
 def build_plan(req: Booking) -> RecoveryPlan:
     departure = parse_time(req.departure_time)
     deadline = parse_time(req.arrival_deadline)
+    # Mixing local (naive) and timezone-aware timestamps makes comparisons
+    # ambiguous and can otherwise surface as an unhandled server error.
+    departure_is_aware = departure.utcoffset() is not None
+    deadline_is_aware = deadline.utcoffset() is not None
+    if departure_is_aware != deadline_is_aware:
+        raise ValueError(
+            "Use either local timestamps for both fields or timezone-aware timestamps for both fields"
+        )
     if deadline <= departure:
         raise ValueError("Arrival deadline must be after departure time")
 
@@ -262,7 +272,22 @@ def get_plan_audit(plan_id: int):
 
 @app.get("/health")
 def health():
+    """Liveness check: the process is running."""
     return {"ok": True, "service": "StrandedPool Recovery", "data_mode": "SIMULATED DEMO DATA"}
+
+@app.get("/health/ready")
+def readiness():
+    """Readiness check: the app can reach its configured SQLite database."""
+    try:
+        with db_connect() as connection:
+            connection.execute("SELECT 1").fetchone()
+    except sqlite3.Error as exc:
+        raise HTTPException(status_code=503, detail="Database is not ready") from exc
+    return {
+        "ok": True,
+        "database": "reachable",
+        "data_mode": "SIMULATED DEMO DATA",
+    }
 
 @app.post("/api/recovery/plan", response_model=RecoveryPlan)
 def recovery_plan(req: Booking):
