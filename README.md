@@ -10,6 +10,7 @@ This repository is an independent implementation. The original repository did no
 - FastAPI backend with /health liveness, /health/ready database readiness, POST /api/recovery/plan, and a live current-weather endpoint.
 - Alternative ranking against budget, arrival deadline, and number of travellers.
 - Live current weather for the matched origin and destination cities via Open-Meteo, with provider failures shown instead of fabricated weather.
+- Live 3-day city-level weather outlook for the origin and destination, including temperature range, precipitation chance, rainfall, and maximum wind, with no fabricated fallback.
 - Estimated road-driving distance and duration from Open-Meteo geocoding and the OSRM public routing service, clearly separated from simulated public-transport options.
 - Provider-status endpoint that clearly distinguishes simulated transport inventory, on-demand weather integration, and unavailable booking actions.
 - Simulated capacity checks and shared-ride pooling proposals.
@@ -98,6 +99,10 @@ Response includes ranked alternatives, feasibility reasons, pool proposals, down
 ### Driving route context
 
 `GET /api/route/driving?origin=Mysuru&destination=Mangaluru` geocodes both places and requests a road route from the OSRM public routing service. It returns distance and estimated driving duration. This is not a public-transport timetable, not a traffic-aware arrival guarantee, and not an official travel advisory. Provider errors are returned rather than replaced with fabricated route values.
+
+### Weather forecast
+
+`GET /api/weather/forecast?city=Mysuru&days=3` returns a live daily forecast for 1–7 days from Open-Meteo, including minimum/maximum temperature, precipitation probability and total, weather condition, and maximum wind. The UI requests a 3-day outlook for both journey cities. This is city-level forecast data, not an official warning or route-specific forecast. Provider errors are surfaced instead of substituted with demo values.
 
 ### Current weather
 
