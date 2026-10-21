@@ -418,12 +418,20 @@ async def reprice_flight_offer(offer_id: str):
         payload = response.json()
     except ValueError as exc:
         raise HTTPException(status_code=502, detail="Provider repricing returned invalid JSON.") from exc
+    price = payload.get("price") if isinstance(payload, dict) else None
+    amount = price.get("amount") if isinstance(price, dict) else None
+    currency = price.get("currency") if isinstance(price, dict) else None
+    revalidated = isinstance(amount, (int, float)) and isinstance(currency, str) and bool(payload.get("id"))
     return {
         "provider": "DRCT",
         "provider_offer_id": offer_id,
         "data_mode": "SANDBOX_TEST_DATA" if DRCT_SANDBOX else "LIVE PROVIDER REPRICE",
-        "verification": "SANDBOX_ONLY_NOT_REAL" if DRCT_SANDBOX else "REPRICED_BY_PROVIDER",
+        "verification": "SANDBOX_ONLY_NOT_REAL" if DRCT_SANDBOX else ("REPRICED_BY_PROVIDER" if revalidated else "REPRICE_RESPONSE_NEEDS_REVIEW"),
+        "availability_verified": bool(revalidated and not DRCT_SANDBOX),
+        "current_fare": amount,
+        "currency": currency,
+        "expires_at": payload.get("expire_at") if isinstance(payload, dict) else None,
         "booking_completed": False,
         "provider_response": payload,
-        "note": "This is a provider reprice response, not a booking or ticket. Confirm the provider's response and terms before proceeding.",
+        "note": "Provider repricing refreshes the offer price and expiry. It does not book or issue a ticket. Sandbox repricing is test data, not real availability.",
     }
