@@ -7,7 +7,7 @@ This repository is an independent implementation. The original repository did no
 ## What works now
 
 - Responsive browser UI for entering an affected journey.
-- FastAPI backend with /health and POST /api/recovery/plan.
+- FastAPI backend with /health liveness, /health/ready database readiness, and POST /api/recovery/plan.
 - Alternative ranking against budget, arrival deadline, and number of travellers.
 - Simulated capacity checks and shared-ride pooling proposals.
 - Downstream booking risk reminders for hotels and onward pickups.
@@ -98,11 +98,20 @@ Response includes ranked alternatives, feasibility reasons, pool proposals, down
 
 The browser interface also has controls to save a plan and review saved history. SQLite is stored in `strandedpool.db` by default; set `STRANDEDPOOL_DB` to choose another path.
 
+## Health checks
+
+- `GET /health` is a liveness check and confirms the process is responding.
+- `GET /health/ready` checks that the configured SQLite database can be queried. It returns HTTP 503 if the database is unavailable.
+
+Both endpoints explicitly identify the current data mode as simulated demo data.
+
 ## Tests
 
 ~~~bash
 pytest -q
 ~~~
+
+GitHub Actions runs the test suite on Python 3.11 and 3.12 for pushes to `main` and pull requests targeting `main`. The API contract tests cover readiness, invalid timestamps, timezone consistency, and missing saved plans.
 
 ## Project structure
 
