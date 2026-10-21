@@ -116,6 +116,47 @@ def _fare_value(option: dict, response: dict) -> tuple[float | None, str | None]
     return None, None
 
 
+def _transfer_minutes(option: dict, response: dict) -> int | None:
+    """Derive connection layover time only when provider segment timestamps exist."""
+    referenced = []
+    for item in _walk_dicts(option):
+        for key in ("segments", "segment_ids"):
+            value = item.get(key)
+            if isinstance(value, list):
+                referenced.extend(value)
+    provider_segments = response.get("segments", [])
+    if not isinstance(provider_segments, list) or not provider_segments:
+        return None
+    if referenced and all(isinstance(value, str) for value in referenced):
+        ordered = [segment for ref in referenced for segment in provider_segments
+                   if isinstance(segment, dict) and segment.get("id") == ref]
+    else:
+        ordered = [segment for segment in referenced if isinstance(segment, dict)]
+    intervals = []
+    for segment in ordered:
+        departures = []
+        arrivals = []
+        for item in _walk_dicts(segment):
+            for key in ("departure_at", "departure_time", "depart_at", "at"):
+                parsed = _parse_datetime(item.get(key))
+                if parsed and key != "at":
+                    departures.append(parsed)
+            for key in ("arrival_at", "arrival_time", "arrive_at"):
+                parsed = _parse_datetime(item.get(key))
+                if parsed:
+                    arrivals.append(parsed)
+        intervals.append((min(departures) if departures else None, max(arrivals) if arrivals else None))
+    if len(intervals) < 2 or any(not dep or not arr for dep, arr in intervals):
+        return None
+    layovers = []
+    for previous, following in zip(intervals, intervals[1:]):
+        delta = (following[0] - previous[1]).total_seconds()
+        if delta < 0:
+            return None
+        layovers.append(int(delta // 60))
+    return sum(layovers)
+
+
 def _segment_count(option: dict, response: dict) -> int | None:
     segments = []
     for item in _walk_dicts(option):
@@ -149,6 +190,7 @@ def _normalise_options(payload: dict) -> list[dict]:
         duration = _duration_minutes(option, payload)
         segment_count = _segment_count(option, payload)
         stops = max(0, segment_count - 1) if segment_count is not None else None
+        transfer_minutes = _transfer_minutes(option, payload)
         # A returned offer is evidence that the provider returned an offer, not a
         # promise that seats remain bookable later. Reprice before any booking.
         results.append({
@@ -159,6 +201,7 @@ def _normalise_options(payload: dict) -> list[dict]:
             "duration_minutes": duration,
             "segments": segment_count,
             "stops": stops,
+            "transfer_minutes": transfer_minutes,
             "availability_status": "provider_offer_returned_reprice_before_booking",
             "verification": "LIVE_PROVIDER_RESPONSE" if not DRCT_SANDBOX else "SANDBOX_TEST_DATA",
             "simulated": DRCT_SANDBOX,
@@ -173,6 +216,7 @@ def _normalise_options(payload: dict) -> list[dict]:
         item["duration_minutes"] is None,
         item["fare"] if item["fare"] is not None else float("inf"),
         item["duration_minutes"] if item["duration_minutes"] is not None else float("inf"),
+        item["transfer_minutes"] if item["transfer_minutes"] is not None else float("inf"),
         item["stops"] if item["stops"] is not None else 10**6,
     ))
     for index, item in enumerate(results, start=1):
