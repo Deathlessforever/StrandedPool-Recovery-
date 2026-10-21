@@ -64,7 +64,7 @@ def test_provider_response_is_ranked_without_fabricating_missing_fields():
     assert results[0]["stops"] == 0
     assert results[-1]["fare"] is None
     assert results[-1]["duration_minutes"] is None
-    assert results[-1]["verification"] in {"LIVE_PROVIDER_RESPONSE", "SANDBOX_TEST_DATA"}
+    assert results[-1]["verification"] in {"PROVIDER_SEARCH_RESULT_UNPRICED", "SANDBOX_TEST_DATA"}
     assert results[-1]["simulated"] is (flights.DRCT_SANDBOX)
 
 
