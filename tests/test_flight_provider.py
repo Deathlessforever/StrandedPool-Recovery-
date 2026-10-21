@@ -77,3 +77,30 @@ def test_provider_response_with_unrecognised_schema_is_not_replaced_by_demo():
         assert "no demo data was substituted" in exc.detail
     else:
         raise AssertionError("Unexpected provider schema should fail closed")
+
+
+
+def test_normalises_documented_drct_offer_shape_and_transfer_time():
+    payload = {
+        "flights_options": [{
+            "flights": [{"id": "F1", "journey_time": 19800, "segments": ["S1", "S2"]}],
+            "offers": [{"id": "LH_test_offer", "price": {"amount": 182.4, "currency": "EUR"}}],
+        }],
+        "segments": [
+            {"id": "S1", "transfer_time": 0, "duration": 9000},
+            {"id": "S2", "transfer_time": 1800, "duration": 9000},
+        ],
+        "fares": [],
+        "passengers": [{"id": "PAX1", "type": "ADT"}],
+    }
+    results = flights._normalise_options(payload)
+    assert len(results) == 1
+    item = results[0]
+    assert item["provider_offer_id"] == "LH_test_offer"
+    assert item["fare"] == 182.4
+    assert item["currency"] == "EUR"
+    assert item["duration_minutes"] == 330
+    assert item["segments"] == 2
+    assert item["stops"] == 1
+    assert item["transfer_minutes"] == 30
+    assert item["availability_status"] == "provider_offer_returned_unrepriced"
