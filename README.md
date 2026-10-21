@@ -10,6 +10,7 @@ This repository is an independent implementation. The original repository did no
 - FastAPI backend with /health liveness, /health/ready database readiness, POST /api/recovery/plan, and a live current-weather endpoint.
 - Alternative ranking against budget, arrival deadline, and number of travellers.
 - Live current weather for the matched origin and destination cities via Open-Meteo, with provider failures shown instead of fabricated weather.
+- Provider-status endpoint that clearly distinguishes simulated transport inventory, on-demand weather integration, and unavailable booking actions.
 - Simulated capacity checks and shared-ride pooling proposals.
 - Downstream booking risk reminders for hotels and onward pickups.
 - Copyable draft messages for hotel, pickup, and refund/assistance requests.
@@ -88,6 +89,10 @@ curl -X POST http://127.0.0.1:8000/api/recovery/plan \
 ~~~
 
 Response includes ranked alternatives, feasibility reasons, pool proposals, downstream risks, and draft messages. Every alternative has simulated=true and the response identifies its data mode.
+
+### Provider status
+
+`GET /api/providers/status` reports what is actually implemented. Transport inventory is marked simulated-only, current weather is marked implemented but its connectivity is checked only when requested, and booking/cancellation/provider messaging are explicitly marked not implemented.
 
 ### Current weather
 
