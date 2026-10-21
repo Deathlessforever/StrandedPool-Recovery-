@@ -7,6 +7,7 @@ import os
 import sqlite3
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
+import httpx
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -289,6 +290,107 @@ def readiness():
         "data_mode": "SIMULATED DEMO DATA",
     }
 
+WEATHER_CODES = {
+    0: "Clear sky",
+    1: "Mainly clear",
+    2: "Partly cloudy",
+    3: "Overcast",
+    45: "Fog",
+    48: "Depositing rime fog",
+    51: "Light drizzle",
+    53: "Moderate drizzle",
+    55: "Dense drizzle",
+    56: "Light freezing drizzle",
+    57: "Dense freezing drizzle",
+    61: "Slight rain",
+    63: "Moderate rain",
+    65: "Heavy rain",
+    66: "Light freezing rain",
+    67: "Heavy freezing rain",
+    71: "Slight snowfall",
+    73: "Moderate snowfall",
+    75: "Heavy snowfall",
+    77: "Snow grains",
+    80: "Slight rain showers",
+    81: "Moderate rain showers",
+    82: "Violent rain showers",
+    85: "Slight snow showers",
+    86: "Heavy snow showers",
+    95: "Thunderstorm",
+    96: "Thunderstorm with slight hail",
+    99: "Thunderstorm with heavy hail",
+}
+
+@app.get("/api/weather/current")
+async def current_weather(city: str):
+    """Fetch current conditions for a city from Open-Meteo; never substitutes demo weather."""
+    city = city.strip()
+    if not city or len(city) > 100:
+        raise HTTPException(status_code=422, detail="City must be between 1 and 100 characters")
+
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            geo_response = await client.get(
+                "https://geocoding-api.open-meteo.com/v1/search",
+                params={"name": city, "count": 1, "language": "en", "format": "json"},
+            )
+            geo_response.raise_for_status()
+            locations = geo_response.json().get("results") or []
+            if not locations:
+                raise HTTPException(status_code=404, detail=f"No location found for '{city}'")
+
+            location = locations[0]
+            weather_response = await client.get(
+                "https://api.open-meteo.com/v1/forecast",
+                params={
+                    "latitude": location["latitude"],
+                    "longitude": location["longitude"],
+                    "current": (
+                        "temperature_2m,relative_humidity_2m,apparent_temperature,"
+                        "is_day,precipitation,rain,showers,snowfall,weather_code,wind_speed_10m"
+                    ),
+                    "timezone": "auto",
+                },
+            )
+            weather_response.raise_for_status()
+            current = weather_response.json().get("current")
+            if not current:
+                raise HTTPException(status_code=502, detail="Weather provider returned no current conditions")
+    except HTTPException:
+        raise
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Live weather provider is temporarily unavailable; no weather estimate was substituted",
+        ) from exc
+
+    code = current.get("weather_code")
+    return {
+        "data_mode": "LIVE WEATHER DATA",
+        "provider": "Open-Meteo",
+        "location": {
+            "name": location.get("name", city),
+            "country": location.get("country"),
+            "latitude": location["latitude"],
+            "longitude": location["longitude"],
+        },
+        "observed_at": current.get("time"),
+        "current": {
+            "condition": WEATHER_CODES.get(code, "Unknown conditions"),
+            "weather_code": code,
+            "temperature_c": current.get("temperature_2m"),
+            "feels_like_c": current.get("apparent_temperature"),
+            "relative_humidity_percent": current.get("relative_humidity_2m"),
+            "precipitation_mm": current.get("precipitation"),
+            "wind_speed_kmh": current.get("wind_speed_10m"),
+            "is_day": current.get("is_day"),
+        },
+        "note": (
+            "These are current conditions at the matched city, not a route forecast or official travel alert. "
+            "Check official weather and transport advisories before travelling."
+        ),
+    }
+
 @app.post("/api/recovery/plan", response_model=RecoveryPlan)
 def recovery_plan(req: Booking):
     try:
@@ -340,7 +442,8 @@ function render(d){const cards=d.alternatives.map((a,i)=>'<article class="option
 const pools=d.pool_proposals.length?d.pool_proposals.map(p=>'<div class="action"><strong>'+esc(p.mode)+' · '+esc(p.provider)+'</strong><p>Suggested group: '+p.suggested_group_size+' · '+money(p.cost_per_person_inr)+' per person</p><p class="muted">'+esc(p.status)+'</p></div>').join(''):'<p>No shared ride proposals in this scenario.</p>';
 const risks=d.downstream_risks.map(r=>'<li><strong>'+esc(r.booking)+' — '+esc(r.risk)+'</strong><br>'+esc(r.suggested_action)+'</li>').join('');
 const actions=d.action_pack.map((a,i)=>'<div class="action"><strong>'+esc(a.title)+'</strong><pre id="msg'+i+'">'+esc(a.text)+'</pre><button type="button" onclick="copyMsg('+i+')">Copy message</button></div>').join('');
-results.innerHTML='<h2>Recovery plan</h2><p class="muted">'+esc(d.disruption_summary)+' · '+esc(d.status)+'</p><div class="tag">'+esc(d.data_mode)+'</div><h3>Ranked alternatives</h3><div class="cards">'+cards+'</div><div class="section"><h3>Pooling proposals</h3>'+pools+'</div><div class="section"><h3>Downstream booking risks</h3><ul>'+risks+'</ul></div><div class="section"><h3>Action pack</h3>'+actions+'</div><div class="notice">'+esc(d.note)+'</div><button type="button" onclick="savePlan()">Save plan to recovery history</button><button type="button" onclick="loadHistory()">View saved plans</button><div id="history"></div>'}
+results.innerHTML='<h2>Recovery plan</h2><p class="muted">'+esc(d.disruption_summary)+' · '+esc(d.status)+'</p><div class="tag">'+esc(d.data_mode)+'</div><div class="section"><h3>Current weather context</h3><p class="muted">Live conditions at the matched origin and destination locations. This is not a route forecast.</p><div id="weather" class="cards"><p>Loading live weather…</p></div></div><h3>Ranked alternatives</h3><div class="cards">'+cards+'</div><div class="section"><h3>Pooling proposals</h3>'+pools+'</div><div class="section"><h3>Downstream booking risks</h3><ul>'+risks+'</ul></div><div class="section"><h3>Action pack</h3>'+actions+'</div><div class="notice">'+esc(d.note)+'</div><button type="button" onclick="savePlan()">Save plan to recovery history</button><button type="button" onclick="loadHistory()">View saved plans</button><div id="history"></div>';loadCurrentWeather(d.original_journey.origin,d.original_journey.destination)}
+window.loadCurrentWeather=async(origin,destination)=>{const target=document.querySelector('#weather');if(!target)return;const cities=[...new Set([origin,destination])];const items=await Promise.all(cities.map(async city=>{try{const r=await fetch('/api/weather/current?city='+encodeURIComponent(city));const data=await r.json();return r.ok?data:{error:data.detail||'Weather provider unavailable',city}}catch(e){return {error:'Could not connect to the live weather endpoint',city}}}));target.innerHTML=items.map(w=>{if(w.error)return '<article class="option"><h3>'+esc(w.city)+'</h3><p class="bad">'+esc(w.error)+'</p><p class="muted">No demo weather substituted.</p></article>';const v=w.current;return '<article class="option"><span class="tag">LIVE · '+esc(w.provider)+'</span><h3>'+esc(w.location.name)+(w.location.country?', '+esc(w.location.country):'')+'</h3><div class="money">'+esc(v.temperature_c)+'°C</div><p>'+esc(v.condition)+' · feels like '+esc(v.feels_like_c)+'°C</p><p>'+esc(v.relative_humidity_percent)+'% humidity · wind '+esc(v.wind_speed_kmh)+' km/h</p><p>Precipitation: '+esc(v.precipitation_mm)+' mm</p><p class="muted">Observed: '+esc(w.observed_at||'time not provided')+'</p></article>'}).join('')+'<p class="muted">Weather source: Open-Meteo. Current city conditions do not replace official alerts or a route forecast.</p>'};
 window.savePlan=async()=>{if(!lastPayload){alert('Build a plan first');return}try{const r=await fetch('/api/recovery/saved-plans',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(lastPayload)});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Save failed');alert('Saved recovery plan #'+d.plan_id);await loadHistory()}catch(e){alert(e.message||'Save failed')}};
 window.loadHistory=async()=>{const target=document.querySelector('#history');if(!target)return;target.innerHTML='<p>Loading saved plans…</p>';try{const r=await fetch('/api/recovery/saved-plans');const d=await r.json();target.innerHTML='<h3>Saved recovery history</h3>'+(d.items.length?d.items.map(p=>'<div class="action"><strong>#'+p.id+' · '+esc(p.origin)+' → '+esc(p.destination)+'</strong><p>'+esc(p.status)+' · '+esc(p.created_at)+'</p>'+(p.selected_provider?'<p>Selected demo option: '+esc(p.selected_provider)+'</p>':'')+'<a href="/api/recovery/saved-plans/'+p.id+'" target="_blank" rel="noreferrer">Open plan details and audit log</a></div>').join(''):'<p>No saved plans yet.</p>')}catch(e){target.innerHTML='<p>Could not load saved history.</p>'}};
 window.copyMsg=async i=>{const t=document.querySelector('#msg'+i).textContent;try{await navigator.clipboard.writeText(t);alert('Message copied')}catch(e){alert('Copy failed — select the text and copy manually')}};
