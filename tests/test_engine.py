@@ -54,7 +54,13 @@ def test_homepage_exposes_feasible_option_decision_control():
 def test_saved_plan_can_be_exported_as_plain_text(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "DB_PATH", tmp_path / "export.db")
     main.init_db()
-    response = client.post("/api/recovery/saved-plans", json=payload())
+    response = client.post("/api/recovery/saved-plans", json={
+        "origin": "Mysuru", "destination": "Mangaluru",
+        "departure_time": "2026-10-21T09:00",
+        "arrival_deadline": "2026-10-21T18:00",
+        "budget_inr": 1500, "travellers": 2,
+        "disruption": "cancelled", "include_pooling": True,
+    })
     assert response.status_code == 200
     plan_id = response.json()["plan_id"]
 
