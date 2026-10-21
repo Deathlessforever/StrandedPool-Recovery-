@@ -16,9 +16,10 @@ from fastapi import APIRouter, HTTPException, Query
 router = APIRouter(prefix="/api/flights", tags=["live flights"])
 DRCT_API_KEY_ENV = "STRANDEDPOOL_DRCT_API_KEY"
 DRCT_SANDBOX = os.getenv("STRANDEDPOOL_DRCT_ENV", "production").strip().lower() == "sandbox"
-DRCT_BASE_URL = (
-    "https://sandbox-api.drct.aero" if DRCT_SANDBOX else "https://api.drct.aero"
-)
+DRCT_BASE_URL = os.getenv(
+    "STRANDEDPOOL_DRCT_BASE_URL",
+    "https://sandbox-api.drct.aero" if DRCT_SANDBOX else "https://api.drct.aero",
+).rstrip("/")
 DRCT_VERSION = os.getenv("STRANDEDPOOL_DRCT_VERSION", "2026-09-01")
 
 
@@ -256,18 +257,23 @@ def _normalise_options(payload: dict) -> list[dict]:
                 "raw_offer": offer,
             })
 
+    # Prices in different currencies are not comparable without an exchange-rate
+    # source, so sort and rank within each provider-reported currency only.
     results.sort(key=lambda item: (
+        item["currency"] or "UNKNOWN",
         item["fare"] is None,
-        item["duration_minutes"] is None,
         item["fare"] if item["fare"] is not None else float("inf"),
         item["duration_minutes"] if item["duration_minutes"] is not None else float("inf"),
         item["transfer_minutes"] if item["transfer_minutes"] is not None else float("inf"),
         item["stops"] if item["stops"] is not None else 10**6,
     ))
-    for index, item in enumerate(results, start=1):
-        item["rank"] = index
+    ranks_by_currency = {}
+    for item in results:
+        currency = item["currency"] or "UNKNOWN"
+        ranks_by_currency[currency] = ranks_by_currency.get(currency, 0) + 1
+        item["rank"] = ranks_by_currency[currency]
         item["ranking_note"] = (
-            "Sorted by provider fare, then total journey duration, then provider-derived transfer time, then stops; missing fields are not estimated."
+            "Ranked within the same currency by provider fare, then total journey duration, transfer time, and stops. Missing fields are not estimated."
             if item["fare"] is not None and item["duration_minutes"] is not None
             else "Partial provider data: missing fare or duration is not fabricated; verify details with the provider."
         )
