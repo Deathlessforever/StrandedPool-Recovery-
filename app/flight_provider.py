@@ -448,7 +448,11 @@ async def reprice_flight_offer(offer_id: str):
         "provider_offer_id": offer_id,
         "data_mode": "SANDBOX_TEST_DATA" if DRCT_SANDBOX else "LIVE PROVIDER REPRICE",
         "verification": "SANDBOX_ONLY_NOT_REAL" if DRCT_SANDBOX else ("REPRICED_BY_PROVIDER" if revalidated else "REPRICE_RESPONSE_NEEDS_REVIEW"),
-        "availability_verified": bool(revalidated and not DRCT_SANDBOX),
+        # Price revalidation is not proof that a seat is still available.
+        # Only a provider response with an explicit inventory signal could
+        # support that claim; this adapter currently does not interpret one.
+        "availability_verified": False,
+        "availability_status": "not_verified_by_price_revalidation",
         "current_fare": amount,
         "currency": currency,
         "expires_at": payload.get("expire_at") if isinstance(payload, dict) else None,
