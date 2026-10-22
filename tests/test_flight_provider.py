@@ -113,3 +113,38 @@ def test_reprice_without_credentials_fails_closed(monkeypatch):
     response = client.post("/api/flights/reprice/LH_test_offer")
     assert response.status_code == 503
     assert "not revalidated" in response.json()["detail"]
+
+
+def test_reprice_does_not_claim_seat_availability_from_price_only(monkeypatch):
+    monkeypatch.setenv("STRANDEDPOOL_DRCT_API_KEY", "test-key")
+    monkeypatch.setattr(flights, "DRCT_SANDBOX", False)
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"id": "LH_test_offer", "price": {"amount": 182.4, "currency": "EUR"}}
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def patch(self, *args, **kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr(flights.httpx, "AsyncClient", FakeAsyncClient)
+    response = client.post("/api/flights/reprice/LH_test_offer")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["verification"] == "REPRICED_BY_PROVIDER"
+    assert data["current_fare"] == 182.4
+    assert data["availability_verified"] is False
+    assert data["availability_status"] == "not_verified_by_price_revalidation"
+    assert data["booking_completed"] is False
